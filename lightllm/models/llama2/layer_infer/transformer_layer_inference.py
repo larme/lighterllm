@@ -22,25 +22,19 @@ class TransformerLayerInfer:
     """
     """
 
-    def __init__(self, layer_num, tp_rank, world_size, network_config, mode=""):
+    def __init__(self, layer_num, network_config, mode=""):
         self.layer_num_ = layer_num
-        self.tp_rank_ = tp_rank
-        self.world_size_ = world_size
         self.network_config_ = network_config
         self.embed_dim_ = network_config["hidden_size"]
         self.layer_norm_eps_ = network_config["rms_norm_eps"]
         self.head_num_ = network_config["num_attention_heads"]
         self.head_dim_ = self.embed_dim_ // self.head_num_
-        assert self.head_num_ % self.world_size_ == 0
         
         self.key_value_head_num_ = network_config["num_key_value_heads"]
-        assert self.key_value_head_num_ % self.world_size_ == 0
+        self.kv_head_sum_dim_ = self.key_value_head_num_ * self.head_dim_
         
-        self.tp_head_num_ = self.head_num_ // self.world_size_
+        self.tp_head_num_ = self.head_num_
         self.tp_head_sum_dim_ = self.tp_head_num_ * self.head_dim_
-        
-        self.tp_kv_head_num = self.key_value_head_num_ // self.world_size_
-        self.tp_kv_head_sum_dim_ = self.tp_kv_head_num * self.head_dim_
         
         self.mode = mode
         return
@@ -53,16 +47,16 @@ class TransformerLayerInfer:
         prefill_value_buffer = infer_state.prefill_value_buffer
         
         total_token_num = infer_state.total_token_num
-        calcu_shape1 = (total_token_num, self.tp_head_num_, self.head_dim_)
+        calcu_shape1 = (total_token_num, self.head_num_, self.head_dim_)
         input1 = rmsnorm_forward(input_embding, weight=layer_weight.input_layernorm, eps=self.layer_norm_eps_)
 
         q = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.q_weight_)
         rotary_emb_fwd(q.view(calcu_shape1), infer_state.position_cos, infer_state.position_sin)
         torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    out=prefill_key_buffer[0:total_token_num, :, :].view(-1, self.tp_kv_head_sum_dim_))
+                    out=prefill_key_buffer[0:total_token_num, :, :].view(-1, self.kv_head_sum_dim_))
         rotary_emb_fwd(prefill_key_buffer[0:total_token_num, :, :], infer_state.position_cos, infer_state.position_sin)
         torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_,
-                    out=prefill_value_buffer[0:total_token_num, :, :].view(-1, self.tp_kv_head_sum_dim_))
+                    out=prefill_value_buffer[0:total_token_num, :, :].view(-1, self.kv_head_sum_dim_))
         
         input1 = None
         o_tensor = torch.empty_like(q)
@@ -76,10 +70,8 @@ class TransformerLayerInfer:
         destindex_copy_kv(prefill_key_buffer, prefill_mem_index, mem_manager.key_buffer[self.layer_num_])
         destindex_copy_kv(prefill_value_buffer, prefill_mem_index, mem_manager.value_buffer[self.layer_num_])
         q = None
-        o_tensor1 = torch.mm(o_tensor.view(-1, self.tp_head_sum_dim_), layer_weight.att_out_dense_weight_)
+        o_tensor1 = torch.mm(o_tensor.view(-1, self.embed_dim_), layer_weight.att_out_dense_weight_)
         o_tensor = None
-        if self.world_size_ > 1:
-            dist.all_reduce(o_tensor1, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o_tensor1.view(total_token_num, self.embed_dim_))
         o_tensor1 = None
         return
@@ -101,8 +93,6 @@ class TransformerLayerInfer:
         gate_out, up_out = None, None
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
-        if self.world_size_ > 1:
-            dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn2_out.view(total_token_num, self.embed_dim_))
         ffn2_out = None
         return
@@ -117,7 +107,7 @@ class TransformerLayerInfer:
     def _token_flash_attention(self, input_embding, infer_state: InferStateInfo, layer_weight: TransformerLayerWeight):
         total_token_num = infer_state.total_token_num
         batch_size = infer_state.batch_size
-        calcu_shape1 = (batch_size, self.tp_head_num_, self.head_dim_)
+        calcu_shape1 = (batch_size, self.head_num_, self.head_dim_)
         if infer_state.decode_is_contiguous:
             cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.decode_mem_start:infer_state.decode_mem_end, :, :]
             cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.decode_mem_start:infer_state.decode_mem_end, :, :]
@@ -130,11 +120,11 @@ class TransformerLayerInfer:
         q = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.q_weight_)
         rotary_emb_fwd(q.view(calcu_shape1), infer_state.position_cos, infer_state.position_sin)
         torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    out=cache_k.view(-1, self.tp_kv_head_sum_dim_))
+                    out=cache_k.view(-1, self.kv_head_sum_dim_))
         rotary_emb_fwd(cache_k,
                         infer_state.position_cos, infer_state.position_sin)
         torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_,
-                    out=cache_v.view(-1, self.tp_kv_head_sum_dim_))
+                    out=cache_v.view(-1, self.kv_head_sum_dim_))
         
         if not infer_state.decode_is_contiguous:
             destindex_copy_kv(cache_k, infer_state.decode_mem_index, infer_state.mem_manager.key_buffer[self.layer_num_])
@@ -142,7 +132,7 @@ class TransformerLayerInfer:
              
         input1 = None
 
-        att_m_tensor = torch.empty((self.tp_head_num_, total_token_num), dtype=q.dtype, device="cuda")
+        att_m_tensor = torch.empty((self.head_num_, total_token_num), dtype=q.dtype, device="cuda")
 
         token_att_fwd(q.view(calcu_shape1),
                       infer_state.mem_manager.key_buffer[self.layer_num_],
@@ -168,10 +158,8 @@ class TransformerLayerInfer:
         prob = None
 
         q = None
-        o_tensor1 = torch.mm(o_tensor.view(-1, self.tp_head_sum_dim_), layer_weight.att_out_dense_weight_)
+        o_tensor1 = torch.mm(o_tensor.view(-1, self.embed_dim_), layer_weight.att_out_dense_weight_)
         o_tensor = None
-        if self.world_size_ > 1:
-            dist.all_reduce(o_tensor1, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o_tensor1.view(batch_size, self.embed_dim_))
         o_tensor1 = None
         return
@@ -193,8 +181,6 @@ class TransformerLayerInfer:
 
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
-        if self.world_size_ > 1:
-            dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn2_out.view(batch_size, self.embed_dim_))
         ffn2_out = None
         return

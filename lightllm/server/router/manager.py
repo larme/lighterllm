@@ -14,10 +14,9 @@ from ..io_struct import BatchTokenIdOut, AbortReq
 
 class RouterManager:
 
-    def __init__(self, weightdir, load_way, world_size, max_total_token_num, batch_max_tokens, running_max_req_size, eos_id, 
-                 router_port, detokenization_port, model_rpc_ports, mode=""):
+    def __init__(self, weightdir, load_way, max_total_token_num, batch_max_tokens, running_max_req_size, eos_id, 
+                 router_port, detokenization_port, model_rpc_port, mode=""):
         self.model_weightdir = weightdir
-        self.world_size = world_size
         self.load_way = load_way
         self.mode = mode
         self.max_total_token_num = max_total_token_num
@@ -35,27 +34,21 @@ class RouterManager:
         
         self.send_to_detokenization = context.socket(zmq.PUSH)
         self.send_to_detokenization.connect(f"tcp://127.0.0.1:{detokenization_port}")
-        self.model_rpc_ports = model_rpc_ports
+        self.model_rpc_port = model_rpc_port
     
 
     async def wait_to_model_ready(self):
-        self.model_rpcs: List[ModelRpcClient] = []
-        for rank_id in range(self.world_size):
-            rpc_model = await start_model_process(port=self.model_rpc_ports[rank_id], world_size=self.world_size)
-            self.model_rpcs.append(rpc_model)
+        self.model_rpc: Optional[ModelRpcClient] = None
+        rpc_model = await start_model_process(port=self.model_rpc_port)
+        self.model_rpc = rpc_model
 
-        init_model_ret = []
-        for rank_id in range(self.world_size):  # async init model process
-            init_model_ret.append(
-                self.model_rpcs[rank_id].init_model(
-                    rank_id,
-                    self.world_size,
-                    self.model_weightdir,
-                    self.max_total_token_num,
-                    self.load_way,
-                    self.mode))
+        await self.model_rpc.init_model(
+            self.model_weightdir,
+            self.max_total_token_num,
+            self.load_way,
+            self.mode
+        )
 
-        await asyncio.gather(*init_model_ret)
         return
 
     def add_req(
@@ -129,18 +122,15 @@ class RouterManager:
 
     async def _init_batch(self, batch: Batch):
         reqs = [r.to_rpc_obj() for r in batch.reqs]
-        rets = [self.model_rpcs[tp_rank].init_batch(batch.batch_id, reqs) for tp_rank in range(self.world_size)]
+        rets = [self.model_rpc.init_batch(batch.batch_id, reqs)]
         await asyncio.gather(*rets)
         return
 
     async def _prefill_batch(self, batch):
         await self._init_batch(batch)
-        rets = [self.model_rpcs[tp_rank].prefill_batch(batch.batch_id) for tp_rank in range(self.world_size)]
+        rets = [self.model_rpc.prefill_batch(batch.batch_id)]
         ans = await asyncio.gather(*rets)
-        if self.world_size != 1:
-            req_to_out_token_id = obtain(ans[0])
-        else:
-            req_to_out_token_id = ans[0]
+        req_to_out_token_id = ans[0]
         self._add_token_id_to_req(batch, req_to_out_token_id)
         has_new_finished_req = batch.mark_finished_req(self.eos_id)
         self._send_to_detokenization_proc(batch, req_to_out_token_id)
@@ -148,12 +138,9 @@ class RouterManager:
         return
 
     async def _decode_batch(self, batch:Batch):
-        rets = [self.model_rpcs[tp_rank].decode_batch(batch.batch_id) for tp_rank in range(self.world_size)]
+        rets = [self.model_rpc.decode_batch(batch.batch_id)]
         ans = await asyncio.gather(*rets)
-        if self.world_size != 1:
-            req_to_out_token_id = obtain(ans[0])
-        else:
-            req_to_out_token_id = ans[0]
+        req_to_out_token_id = ans[0]
         self._add_token_id_to_req(batch, req_to_out_token_id)
         has_new_finished_req = batch.mark_finished_req(self.eos_id)
         self._send_to_detokenization_proc(batch, req_to_out_token_id)
@@ -162,17 +149,17 @@ class RouterManager:
 
     async def _filter_batch(self, batch: Batch):
         req_id_list = [r.request_id for r in batch.reqs]
-        rets = [self.model_rpcs[tp_rank].filter_batch(batch.batch_id, req_id_list) for tp_rank in range(self.world_size)]
+        rets = [self.model_rpc.filter_batch(batch.batch_id, req_id_list)]
         await asyncio.gather(*rets)
         return
 
     async def _merge_batch(self, batch1, batch2):
-        rets = [self.model_rpcs[tp_rank].merge_batch(batch1.batch_id, batch2.batch_id) for tp_rank in range(self.world_size)]
+        rets = [self.model_rpc.merge_batch(batch1.batch_id, batch2.batch_id)]
         await asyncio.gather(*rets)
         return
 
     async def _remove_batch(self, batch):
-        rets = [self.model_rpcs[tp_rank].remove_batch(batch.batch_id) for tp_rank in range(self.world_size)]
+        rets = [self.model_rpc.remove_batch(batch.batch_id)]
         await asyncio.gather(*rets)
         return
 
@@ -221,18 +208,17 @@ class RouterManager:
         return 
              
 
-def start_router_process(args, router_port, detokenization_port, model_rpc_ports, load_state):
+def start_router_process(args, router_port, detokenization_port, model_rpc_port, load_state):
     router = RouterManager(
         args.model_dir,
         load_way="HF",
-        world_size=args.tp,
         max_total_token_num=args.max_total_token_num,
         batch_max_tokens=args.batch_max_tokens,
         running_max_req_size=args.running_max_req_size,
         eos_id=args.eos_id,
         router_port=router_port,
         detokenization_port=detokenization_port,
-        model_rpc_ports=model_rpc_ports,
+        model_rpc_port=model_rpc_port,
         mode="")
     
     asyncio.run(router.wait_to_model_ready())
@@ -245,11 +231,3 @@ def start_router_process(args, router_port, detokenization_port, model_rpc_ports
     loop.create_task(router.loop_for_fwd())
     loop.run_until_complete(router.loop_for_netio_req())
     return
-    
-    
-    
-    
-    
-    
-    
-    

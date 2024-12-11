@@ -12,9 +12,7 @@ from lightllm.common.mem_manager import MemoryManager
 from lightllm.common.infer_utils import init_bloc
 
 class Llama2TpPartModel:
-    def __init__(self, tp_rank, world_size, weight_dir, max_total_token_num, load_way="HF", mode=""):
-        self.tp_rank_ = tp_rank
-        self.world_size_ = world_size
+    def __init__(self, weight_dir, max_total_token_num, load_way="HF", mode=""):
         self.weight_dir_ = weight_dir
         with open(os.path.join(weight_dir, "config.json"), 'r') as json_file:
             self.config = json.load(json_file)
@@ -22,37 +20,34 @@ class Llama2TpPartModel:
         assert load_way == "HF", "llama only support HF format to load Now!"
         assert mode == "", "future to support int8 int4 ..."
         
-        assert self.config["num_key_value_heads"] % world_size == 0
+        assert self.config["num_key_value_heads"]
         self.mem_manager = MemoryManager(max_total_token_num,  
                                          dtype=torch.float16,
-                                         head_num=self.config["num_key_value_heads"] // world_size,
+                                         head_num=self.config["num_key_value_heads"],
                                          head_dim=self.config["hidden_size"] // self.config["num_attention_heads"],
                                          layer_num=self.config["num_hidden_layers"])
 
-        self.pre_post_weight = PreAndPostLayerWeight(self.tp_rank_, self.world_size_, torch.float16, self.config)
+        self.pre_post_weight = PreAndPostLayerWeight(torch.float16, self.config)
         self.trans_layers_weight = [
-            TransformerLayerWeight(i, self.tp_rank_, self.world_size_, torch.float16, self.config, mode=mode)
+            TransformerLayerWeight(i, torch.float16, self.config, mode=mode)
             for i in range(self.config["num_hidden_layers"])
         ]
 
         load_hf_weights("fp16", weight_dir, pre_post_layer=self.pre_post_weight, transformer_layer_list=self.trans_layers_weight)
 
-        self.pre_infer = PreLayerInfer(tp_rank=self.tp_rank_, world_size=self.world_size_, network_config=self.config)
-        self.post_infer = PostLayerInfer(tp_rank=self.tp_rank_, world_size=self.world_size_, network_config=self.config)
+        self.pre_infer = PreLayerInfer(network_config=self.config)
+        self.post_infer = PostLayerInfer(network_config=self.config)
         self.layers_infer = [
             TransformerLayerInfer(
                 i,
-                tp_rank=self.tp_rank_,
-                world_size=self.world_size_,
                 network_config=self.config,
                 mode=mode) for i in range(
                 self.config["num_hidden_layers"])]
 
         self.head_num_ = self.config["num_attention_heads"]
         self.head_dim_ = self.config["hidden_size"] // self.head_num_
-        assert self.head_num_ % self.world_size_ == 0
-        self.tp_head_num_ = self.head_num_ // self.world_size_
-        self.tp_kv_head_num_ = self.config["num_key_value_heads"] // self.world_size_
+        self.tp_head_num_ = self.head_num_
+        self.tp_kv_head_num_ = self.config["num_key_value_heads"]
         self.vocab_size = self.config["vocab_size"]
         self.init_to_get_rotary()
 

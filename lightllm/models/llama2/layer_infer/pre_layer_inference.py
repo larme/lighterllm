@@ -14,16 +14,13 @@ class PreLayerInfer:
     """
     """
 
-    def __init__(self, tp_rank, world_size, network_config):
-        self.tp_rank_ = tp_rank
-        self.world_size_ = world_size
+    def __init__(self, network_config):
         self.network_config_ = network_config
-        assert (network_config["vocab_size"] % self.world_size_ == 0)
-        self.tp_vocab_size_ = network_config["vocab_size"] // self.world_size_
+        self.tp_vocab_size_ = network_config["vocab_size"]
         self.embed_dim_ = network_config["hidden_size"]
         self.layer_norm_eps_ = network_config["rms_norm_eps"]
-        self.vob_start_id_ = self.tp_vocab_size_ * self.tp_rank_
-        self.vob_end_id_ = self.tp_vocab_size_ * (self.tp_rank_ + 1)
+        self.vob_start_id_ = 0
+        self.vob_end_id_ = self.tp_vocab_size_
 
     @mark_cost_time("pre context forward")
     def context_forward(self, input_ids, infer_state: InferStateInfo, layer_weight: PreAndPostLayerWeight):
@@ -35,8 +32,6 @@ class PreLayerInfer:
         tmp_input_ids[input_mask] = 0
         input_embdings = torch.embedding(layer_weight.wte_weight_, tmp_input_ids, padding_idx=-1)
         input_embdings[input_mask] = 0.0
-        if self.world_size_ > 1:
-            dist.all_reduce(input_embdings, op=dist.ReduceOp.SUM, async_op=False)
         return input_embdings
 
     def token_forward(self, input_ids, infer_state: InferStateInfo, layer_weight: PreAndPostLayerWeight):
@@ -45,6 +40,4 @@ class PreLayerInfer:
         tmp_input_ids[input_mask] = 0
         input_embdings = torch.embedding(layer_weight.wte_weight_, tmp_input_ids, padding_idx=-1)
         input_embdings[input_mask] = 0.0
-        if self.world_size_ > 1:
-            dist.all_reduce(input_embdings, op=dist.ReduceOp.SUM, async_op=False)
         return input_embdings

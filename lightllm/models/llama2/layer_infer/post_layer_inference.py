@@ -15,17 +15,14 @@ class PostLayerInfer:
     """
     """
 
-    def __init__(self, tp_rank, world_size, network_config):
-        self.tp_rank_ = tp_rank
-        self.world_size_ = world_size
+    def __init__(self, network_config):
         self.network_config_ = network_config
-        assert (network_config["vocab_size"] % self.world_size_ == 0)
         self.vocab_size_ = network_config["vocab_size"]
-        self.tp_vocab_size_ = network_config["vocab_size"] // self.world_size_
+        self.tp_vocab_size_ = network_config["vocab_size"]
         self.embed_dim_ = network_config["hidden_size"]
         self.layer_norm_eps_ = network_config["rms_norm_eps"]
-        self.vob_start_id_ = self.tp_vocab_size_ * self.tp_rank_
-        self.vob_end_id_ = self.tp_vocab_size_ * (self.tp_rank_ + 1)
+        self.vob_start_id_ = 0
+        self.vob_end_id_ = self.tp_vocab_size_
 
     def soft_max(self, data):
         return torch.softmax(data.permute(1, 0).float(), dim=-1)
@@ -43,13 +40,7 @@ class PostLayerInfer:
         last_input = rearrange(last_input, "batch embed_dim -> embed_dim batch").contiguous().reshape(-1, batch_size)
         logic_batch = torch.mm(layer_weight.lm_head_weight, last_input)
         last_input = None
-        if self.world_size_ == 1:
-            gather_data = logic_batch
-        else:
-            gather_data = torch.empty((self.vocab_size_, batch_size), device=logic_batch.device, dtype=torch.float16)
-            split_size = self.vocab_size_ // self.world_size_
-            dist.all_gather([gather_data[i * split_size: (i + 1) * split_size, :]
-                            for i in range(self.world_size_)], logic_batch, group=None, async_op=False)
+        gather_data = logic_batch
         logic_batch = None
 
         if not return_logics:

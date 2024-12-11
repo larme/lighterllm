@@ -14,21 +14,13 @@ from .post_process import sample
 
 class ModelRpcServer(rpyc.Service):
 
-    def exposed_init_model(self, rank_id, world_size, weight_dir, max_total_token_num, load_way, mode):
+    def exposed_init_model(self, weight_dir, max_total_token_num, load_way, mode):
         import torch
-        import torch.distributed as dist
-        if world_size != 1:
-            trans_list = [obtain(e) for e in (rank_id, world_size, weight_dir, max_total_token_num, load_way, mode)]
-            rank_id, world_size, weight_dir, max_total_token_num, load_way, mode = trans_list
-
-        self.tp_rank = rank_id
-        self.world_size = world_size
         self.load_way = load_way
         self.mode = mode
         self.cache = {}
 
-        dist.init_process_group('nccl', init_method='tcp://127.0.0.1:28765', rank=rank_id, world_size=world_size)
-        torch.cuda.set_device(rank_id)
+        torch.cuda.set_device(0)
 
         model_cfg, _ = PretrainedConfig.get_config_dict(
             weight_dir
@@ -37,7 +29,7 @@ class ModelRpcServer(rpyc.Service):
         self.model_type = model_cfg["model_type"]
         if self.model_type == 'llama':
            if "num_key_value_heads" in model_cfg.keys():
-               self.model = Llama2TpPartModel(rank_id, world_size, weight_dir, max_total_token_num, load_way, mode)
+               self.model = Llama2TpPartModel(weight_dir, max_total_token_num, load_way, mode)
         else:
             raise ValueError("Not supported model type! The current support model list is [bloom llama].")
         
@@ -45,8 +37,6 @@ class ModelRpcServer(rpyc.Service):
         return
     # @calculate_time(show=True, min_cost_ms=0.1)
     def exposed_add_batch(self, batch_id, reqs, dtype):
-        if self.world_size != 1:
-            batch_id, reqs, dtype = obtain(batch_id), obtain(reqs), obtain(dtype)
         import torch
         if dtype == "fp16":
             dtype = torch.float16
@@ -66,8 +56,6 @@ class ModelRpcServer(rpyc.Service):
 
     # @calculate_time(show=True, min_cost_ms=0.1)
     def exposed_filter_batch(self, batch_id, req_id_list):
-        if self.world_size != 1:
-            batch_id, req_id_list = obtain(batch_id), obtain(req_id_list)
         # print("filter old size:", len(batch.reqs), "new size:", len(req_id_list))
         batch = self.cache.pop(batch_id)
         filter_batch = batch.filter(req_id_list)
@@ -134,83 +122,44 @@ class ModelRpcServer(rpyc.Service):
 
 
 class ModelRpcClient:
-    def __init__(self, model_rpc, world_size):
+    def __init__(self, model_rpc):
         self.model: ModelRpcServer = model_rpc
-        self.world_size = world_size
-        self.use_rpc = self.world_size != 1
-        if self.use_rpc:
-            self._init_model = rpyc.async_(self.model.init_model)
-            self._add_batch = rpyc.async_(self.model.add_batch)
-            self._prefill_batch = rpyc.async_(self.model.prefill_batch)
-            self._decode_batch = rpyc.async_(self.model.decode_batch)
-            self._filter_batch = rpyc.async_(self.model.filter_batch)
-            self._merge_batch = rpyc.async_(self.model.merge_batch)
-            self._remove_batch = rpyc.async_(self.model.remove_batch)
-        else:
-            self._init_model = self.model.exposed_init_model
-            self._add_batch = self.model.exposed_add_batch
-            self._prefill_batch = self.model.exposed_prefill_batch
-            self._decode_batch = self.model.exposed_decode_batch
-            self._filter_batch = self.model.exposed_filter_batch
-            self._merge_batch = self.model.exposed_merge_batch
-            self._remove_batch = self.model.exposed_remove_batch
+        self._init_model = self.model.exposed_init_model
+        self._add_batch = self.model.exposed_add_batch
+        self._prefill_batch = self.model.exposed_prefill_batch
+        self._decode_batch = self.model.exposed_decode_batch
+        self._filter_batch = self.model.exposed_filter_batch
+        self._merge_batch = self.model.exposed_merge_batch
+        self._remove_batch = self.model.exposed_remove_batch
         return
 
-    async def init_model(self, rank_id, world_size, weight_dir, max_total_token_num, load_way, mode):
-        ans = self._init_model(rank_id, world_size, weight_dir, max_total_token_num, load_way, mode)
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return
-        else:
-            return
+    async def init_model(self, weight_dir, max_total_token_num, load_way, mode):
+        ans = self._init_model(weight_dir, max_total_token_num, load_way, mode)
+        return
 
     async def init_batch(self, batch_id, reqs):
         ans = self._add_batch(batch_id, reqs, "fp16")
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return
-        else:
-            return
+        return
 
     async def prefill_batch(self, batch_id):
         ans = self._prefill_batch(batch_id)
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return ans.value
-        else:
-            return ans
+        return ans
 
     async def decode_batch(self, batch_id):
         ans = self._decode_batch(batch_id)
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return ans.value
-        else:
-            return ans
+        return ans
 
     async def filter_batch(self, batch_id, req_id_list):
         ans = self._filter_batch(batch_id, req_id_list)
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return
-        else:
-            return 
+        return
 
     async def merge_batch(self, batch_id1, batch_id2):
         ans = self._merge_batch(batch_id1, batch_id2)
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return
-        else:
-            return
+        return
 
     async def remove_batch(self, batch_id):
         ans = self._remove_batch(batch_id)
-        if self.use_rpc:
-            await asyncio.to_thread(ans.wait)
-            return
-        else:
-            return
+        return
 
 
 def _init_env(port):
@@ -220,24 +169,6 @@ def _init_env(port):
     return
 
 
-async def start_model_process(port, world_size):
+async def start_model_process(port):
     # 单卡时不使用 rpc
-    if world_size == 1:
-        return ModelRpcClient(ModelRpcServer(), world_size)
-    
-    import multiprocessing
-    proc = multiprocessing.Process(target=_init_env, args=(port,))
-    proc.start()
-    await asyncio.sleep(2)
-    repeat_count = 0
-    while repeat_count < 20:
-        try:
-            con = rpyc.connect("localhost", port, config={"allow_pickle": True})
-            break
-        except BaseException:
-            await asyncio.sleep(1)
-        repeat_count += 1
-    if repeat_count == 20:
-        raise Exception("init rpc env error!")
-
-    return ModelRpcClient(con.root, world_size)
+    return ModelRpcClient(ModelRpcServer())

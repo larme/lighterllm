@@ -1,5 +1,4 @@
 import torch
-import torch.distributed as dist
 
 import time
 
@@ -9,7 +8,7 @@ is_show_cost_time = False
 def mark_cost_time(func_name):
     def inner_func(func):
         def time_func(*args, **kwargs):
-            if dist.get_rank() in [0, 1] and is_show_cost_time:
+            if is_show_cost_time:
                 torch.cuda.synchronize()
                 start_time = time.time()
                 ans = func(*args, **kwargs)
@@ -64,5 +63,4 @@ def set_random_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-        
         
