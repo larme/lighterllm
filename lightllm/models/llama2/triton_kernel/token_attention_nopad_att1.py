@@ -53,6 +53,7 @@ def _fwd_kernel_token_att1(
 @torch.no_grad()
 def token_att_fwd(q, k, att_out, B_Loc, B_Start_Loc, B_Seqlen, max_input_len):
     BLOCK = 32
+
     # shape constraints
     Lq, Lk = q.shape[-1], k.shape[-1]
     assert Lq == Lk
@@ -65,7 +66,6 @@ def token_att_fwd(q, k, att_out, B_Loc, B_Start_Loc, B_Seqlen, max_input_len):
     kv_group_num = q.shape[1] // k.shape[1]
 
     num_warps = 4 if Lk <= 64 else 8
-    num_warps = 2
 
     _fwd_kernel_token_att1[grid](
         q, k, sm_scale, B_Loc, B_Start_Loc, B_Seqlen, max_input_len,
