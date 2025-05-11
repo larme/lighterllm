@@ -3,16 +3,27 @@ import os
 import gc
 
 
-def load_hf_weights(data_type, weight_dir, pre_post_layer=None, transformer_layer_list=None):
+def load_hf_weights(data_type, weight_dir, pre_post_layer=None, transformer_layer_list=None, use_safetensors=True):
+    if use_safetensors:
+        from safetensors import safe_open
+
     data_type = torch.float16 if data_type == 'fp16' else torch.float32
     if pre_post_layer is not None:
         assert pre_post_layer.data_type_ == data_type, "type is not right"
     if transformer_layer_list is not None:
         assert transformer_layer_list[0].data_type_ == data_type, "type is not right"
     for file_ in os.listdir(weight_dir):
-        if not file_.endswith(".bin"):
-            continue
-        weights = torch.load(os.path.join(weight_dir, file_), 'cpu')
+        if use_safetensors:
+            if not file_.endswith(".safetensors"):
+                continue
+            weights = {}
+            with safe_open(os.path.join(weight_dir, file_), framework="pt", device="cpu") as f:
+                for key in f.keys():
+                    weights[key] = f.get_tensor(key)
+        else:
+            if not file_.endswith(".bin"):
+                continue
+            weights = torch.load(os.path.join(weight_dir, file_), 'cpu')
         if pre_post_layer is not None:
             pre_post_layer.load_hf_weights(weights)
         if transformer_layer_list is not None:

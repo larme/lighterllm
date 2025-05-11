@@ -19,6 +19,9 @@ class PreAndPostLayerWeight(BaseLayerWeight):
         if "model.embed_tokens.weight" in weights:
             # print(weights['model.embed_tokens.weight'].shape)
             self.wte_weight_ = weights['model.embed_tokens.weight'].contiguous().to(self.data_type_).cuda()
+            tie_word_embeddings = self.network_config.get("tie_word_embeddings", False)
+            if tie_word_embeddings:
+                self.lm_head_weight = self.wte_weight_
         if 'lm_head.weight' in weights:
             # print(weights['lm_head.weight'].shape)
             self.lm_head_weight = weights['lm_head.weight'].contiguous().to(self.data_type_).cuda()

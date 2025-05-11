@@ -12,7 +12,7 @@ from lightllm.common.mem_manager import MemoryManager
 from lightllm.common.infer_utils import init_bloc
 
 class Llama2TpPartModel:
-    def __init__(self, weight_dir, max_total_token_num, load_way="HF", mode=""):
+    def __init__(self, weight_dir, max_total_token_num, load_way="HF", mode="", user_safetensors=True):
         self.weight_dir_ = weight_dir
         with open(os.path.join(weight_dir, "config.json"), 'r') as json_file:
             self.config = json.load(json_file)
@@ -33,7 +33,13 @@ class Llama2TpPartModel:
             for i in range(self.config["num_hidden_layers"])
         ]
 
-        load_hf_weights("fp16", weight_dir, pre_post_layer=self.pre_post_weight, transformer_layer_list=self.trans_layers_weight)
+        load_hf_weights(
+            "fp16",
+            weight_dir,
+            pre_post_layer=self.pre_post_weight,
+            transformer_layer_list=self.trans_layers_weight,
+            use_safetensors=user_safetensors
+        )
 
         self.pre_infer = PreLayerInfer(network_config=self.config)
         self.post_infer = PostLayerInfer(network_config=self.config)
