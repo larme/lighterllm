@@ -48,10 +48,7 @@ def _fwd_kernel_token_att2(
 
 @torch.no_grad()
 def token_att_fwd2(prob, v, out, B_Loc, B_Start_Loc, B_Seqlen, max_input_len):
-    if triton.__version__ >= "2.1.0":
-        BLOCK = 128
-    else:
-        BLOCK = 64
+    BLOCK = 128
     batch, head = B_Loc.shape[0], prob.shape[0]
     grid = (batch, head)
     num_warps = 4
