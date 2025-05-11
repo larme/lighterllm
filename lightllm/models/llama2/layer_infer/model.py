@@ -73,14 +73,21 @@ class Llama2TpPartModel:
             b_start_loc,
             b_seq_len,
             is_prefill=True):
+
+        infer_state = InferStateInfo()
+        infer_state.is_prefill = is_prefill
+        infer_state.batch_size = batch_size
+        infer_state.total_token_num = total_token_num
+        infer_state.max_len_in_batch = max_len_in_batch
+        assert (b_loc.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
+
+        infer_state.b_loc = b_loc
+        infer_state.b_start_loc = b_start_loc
+        infer_state.b_seq_len = b_seq_len
+        infer_state.mem_manager = self.mem_manager
+
         if is_prefill:
-            infer_state = InferStateInfo()
-            infer_state.is_prefill = is_prefill
-            infer_state.batch_size = batch_size
-            infer_state.total_token_num = total_token_num
-            infer_state.max_len_in_batch = max_len_in_batch
             assert (input_ids.shape[0] == total_token_num)
-            assert (b_loc.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
 
             b_seq_len_numpy = b_seq_len.cpu().numpy()
             position_ids = torch.from_numpy(np.concatenate([np.arange(0, b_seq_len_numpy[i])
@@ -88,10 +95,6 @@ class Llama2TpPartModel:
             infer_state.position_cos = torch.index_select(self._cos_cached, 0, position_ids).view(position_ids.shape[0], -1)
             infer_state.position_sin = torch.index_select(self._sin_cached, 0, position_ids).view(position_ids.shape[0], -1)
             position_ids = None
-            infer_state.b_loc = b_loc
-            infer_state.b_start_loc = b_start_loc
-            infer_state.b_seq_len = b_seq_len
-            infer_state.mem_manager = self.mem_manager
             infer_state.prefill_mem_index = self.mem_manager.alloc(infer_state.total_token_num)
             infer_state.prefill_key_buffer = torch.empty((infer_state.total_token_num, self.tp_kv_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
             infer_state.prefill_value_buffer = torch.empty((infer_state.total_token_num, self.tp_kv_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
@@ -100,19 +103,8 @@ class Llama2TpPartModel:
             predict_logics = self._context_forward(input_ids, infer_state)
             return predict_logics
         else:
-            infer_state = InferStateInfo()
-            infer_state.is_prefill = is_prefill
-            infer_state.batch_size = batch_size
-            infer_state.total_token_num = total_token_num
-            infer_state.max_len_in_batch = max_len_in_batch
-            assert (b_loc.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
             infer_state.position_cos = torch.index_select(self._cos_cached, 0, b_seq_len - 1).view(b_seq_len.shape[0], -1)
             infer_state.position_sin = torch.index_select(self._sin_cached, 0, b_seq_len - 1).view(b_seq_len.shape[0], -1)
-            infer_state.b_loc = b_loc
-            infer_state.b_start_loc = b_start_loc
-            infer_state.b_seq_len = b_seq_len
-            
-            infer_state.mem_manager = self.mem_manager
             alloc_mem = self.mem_manager.alloc_contiguous(batch_size)
             if alloc_mem is not None:
                 infer_state.decode_is_contiguous = True
