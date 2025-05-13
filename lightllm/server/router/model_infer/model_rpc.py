@@ -42,6 +42,8 @@ class ModelRpcServer(rpyc.Service):
             dtype = torch.float16
         else:
             assert False, "error dtype"
+
+        batch_id, reqs, dtype = obtain(batch_id), obtain(reqs), obtain(dtype)
         batch_data = InferBatch.init_batch(batch_id, reqs, dtype, torch.cuda.current_device(), self.model.mem_manager, self.model.vocab_size)
         self.cache[batch_id] = batch_data
         return
@@ -57,6 +59,7 @@ class ModelRpcServer(rpyc.Service):
     # @calculate_time(show=True, min_cost_ms=0.1)
     def exposed_filter_batch(self, batch_id, req_id_list):
         # print("filter old size:", len(batch.reqs), "new size:", len(req_id_list))
+        batch_id, req_id_list = obtain(batch_id), obtain(req_id_list)
         batch = self.cache.pop(batch_id)
         filter_batch = batch.filter(req_id_list)
         del batch
@@ -124,42 +127,43 @@ class ModelRpcServer(rpyc.Service):
 class ModelRpcClient:
     def __init__(self, model_rpc):
         self.model: ModelRpcServer = model_rpc
-        self._init_model = self.model.exposed_init_model
-        self._add_batch = self.model.exposed_add_batch
-        self._prefill_batch = self.model.exposed_prefill_batch
-        self._decode_batch = self.model.exposed_decode_batch
-        self._filter_batch = self.model.exposed_filter_batch
-        self._merge_batch = self.model.exposed_merge_batch
-        self._remove_batch = self.model.exposed_remove_batch
-        return
+        self._init_model = rpyc.async_(self.model.init_model)
+        self._add_batch = rpyc.async_(self.model.add_batch)
+        self._prefill_batch = rpyc.async_(self.model.prefill_batch)
+        self._decode_batch = rpyc.async_(self.model.decode_batch)
+        self._filter_batch = rpyc.async_(self.model.filter_batch)
+        self._merge_batch = rpyc.async_(self.model.merge_batch)
+        self._remove_batch = rpyc.async_(self.model.remove_batch)
 
     async def init_model(self, weight_dir, max_total_token_num, load_way, mode):
         ans = self._init_model(weight_dir, max_total_token_num, load_way, mode)
-        return
+        await asyncio.to_thread(ans.wait)
 
     async def init_batch(self, batch_id, reqs):
         ans = self._add_batch(batch_id, reqs, "fp16")
-        return
+        await asyncio.to_thread(ans.wait)
 
     async def prefill_batch(self, batch_id):
         ans = self._prefill_batch(batch_id)
-        return ans
+        await asyncio.to_thread(ans.wait)
+        return ans.value
 
     async def decode_batch(self, batch_id):
         ans = self._decode_batch(batch_id)
-        return ans
+        await asyncio.to_thread(ans.wait)
+        return ans.value
 
     async def filter_batch(self, batch_id, req_id_list):
         ans = self._filter_batch(batch_id, req_id_list)
-        return
+        await asyncio.to_thread(ans.wait)
 
     async def merge_batch(self, batch_id1, batch_id2):
         ans = self._merge_batch(batch_id1, batch_id2)
-        return
+        await asyncio.to_thread(ans.wait)
 
     async def remove_batch(self, batch_id):
         ans = self._remove_batch(batch_id)
-        return
+        await asyncio.to_thread(ans.wait)
 
 
 def _init_env(port):
@@ -170,5 +174,19 @@ def _init_env(port):
 
 
 async def start_model_process(port):
-    # 单卡时不使用 rpc
-    return ModelRpcClient(ModelRpcServer())
+    import multiprocessing
+    proc = multiprocessing.Process(target=_init_env, args=(port,))
+    proc.start()
+    await asyncio.sleep(2)
+    repeat_count = 0
+    while repeat_count < 20:
+        try:
+            con = rpyc.connect("localhost", port, config={"allow_pickle": True})
+            break
+        except BaseException:
+            await asyncio.sleep(1)
+        repeat_count += 1
+    if repeat_count == 20:
+        raise Exception("init rpc env error!")
+
+    return ModelRpcClient(con.root)

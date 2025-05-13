@@ -122,15 +122,13 @@ class RouterManager:
 
     async def _init_batch(self, batch: Batch):
         reqs = [r.to_rpc_obj() for r in batch.reqs]
-        rets = [self.model_rpc.init_batch(batch.batch_id, reqs)]
-        await asyncio.gather(*rets)
+        await self.model_rpc.init_batch(batch.batch_id, reqs)
         return
 
     async def _prefill_batch(self, batch):
         await self._init_batch(batch)
-        rets = [self.model_rpc.prefill_batch(batch.batch_id)]
-        ans = await asyncio.gather(*rets)
-        req_to_out_token_id = ans[0]
+        ans = await self.model_rpc.prefill_batch(batch.batch_id)
+        req_to_out_token_id = obtain(ans)
         self._add_token_id_to_req(batch, req_to_out_token_id)
         has_new_finished_req = batch.mark_finished_req(self.eos_id)
         self._send_to_detokenization_proc(batch, req_to_out_token_id)
@@ -138,9 +136,8 @@ class RouterManager:
         return
 
     async def _decode_batch(self, batch:Batch):
-        rets = [self.model_rpc.decode_batch(batch.batch_id)]
-        ans = await asyncio.gather(*rets)
-        req_to_out_token_id = ans[0]
+        ans = await self.model_rpc.decode_batch(batch.batch_id)
+        req_to_out_token_id = obtain(ans)
         self._add_token_id_to_req(batch, req_to_out_token_id)
         has_new_finished_req = batch.mark_finished_req(self.eos_id)
         self._send_to_detokenization_proc(batch, req_to_out_token_id)
@@ -149,18 +146,15 @@ class RouterManager:
 
     async def _filter_batch(self, batch: Batch):
         req_id_list = [r.request_id for r in batch.reqs]
-        rets = [self.model_rpc.filter_batch(batch.batch_id, req_id_list)]
-        await asyncio.gather(*rets)
+        await self.model_rpc.filter_batch(batch.batch_id, req_id_list)
         return
 
     async def _merge_batch(self, batch1, batch2):
-        rets = [self.model_rpc.merge_batch(batch1.batch_id, batch2.batch_id)]
-        await asyncio.gather(*rets)
+        await self.model_rpc.merge_batch(batch1.batch_id, batch2.batch_id)
         return
 
     async def _remove_batch(self, batch):
-        rets = [self.model_rpc.remove_batch(batch.batch_id)]
-        await asyncio.gather(*rets)
+        await self.model_rpc.remove_batch(batch.batch_id)
         return
 
     async def _handle_finish_req(self, batch: Batch, has_new_finished_req):

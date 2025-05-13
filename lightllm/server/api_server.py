@@ -146,7 +146,7 @@ if __name__ == "__main__":
     
     can_use_ports = alloc_can_use_network_port(num=3 + args.tp)
     router_port, detokenization_port, httpserver_port = can_use_ports[0:3]
-    model_rpc_ports = can_use_ports[3:]
+    model_rpc_port = can_use_ports[3]
     
     httpserver_manager = HttpServerManager(args.model_dir, 
                                            args.tokenizer_mode, 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
                                            max_req_input_len=args.max_req_input_len,
                                            max_req_total_len=args.max_req_total_len)
     load_state = mp.Value('i', 0)
-    mp.Process(target=start_router_process, args=(args, router_port, detokenization_port, model_rpc_ports, load_state)).start()
+    mp.Process(target=start_router_process, args=(args, router_port, detokenization_port, model_rpc_port, load_state)).start()
     mp.Process(target=start_detokenization_process, args=(args, detokenization_port, httpserver_port, load_state)).start()
     while load_state.value != 2: # wait model ready
         pass
