@@ -11,10 +11,12 @@ from lightllm.models.llama2.layer_weights.hf_load_utils import load_hf_weights
 from lightllm.common.mem_manager import MemoryManager
 from lightllm.common.infer_utils import init_bloc
 
-class Llama2TpPartModel:
-    def __init__(self, weight_dir, max_total_token_num, load_way="HF", mode="", user_safetensors=True):
+class Llama2Model:
+    def __init__(self, weight_dir, max_total_token_num, load_way="HF", mode="", use_safetensors=True):
+
         self.weight_dir_ = weight_dir
-        with open(os.path.join(weight_dir, "config.json"), 'r') as json_file:
+        config_path = os.path.join(weight_dir, "config.json")
+        with open(config_path, 'r') as json_file:
             self.config = json.load(json_file)
 
         assert load_way == "HF", "llama only support HF format to load Now!"
@@ -38,7 +40,7 @@ class Llama2TpPartModel:
             weight_dir,
             pre_post_layer=self.pre_post_weight,
             transformer_layer_list=self.trans_layers_weight,
-            use_safetensors=user_safetensors
+            use_safetensors=use_safetensors
         )
 
         self.pre_infer = PreLayerInfer(network_config=self.config)

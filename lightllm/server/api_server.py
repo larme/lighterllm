@@ -34,6 +34,7 @@ from .detokenization.manager import start_detokenization_process
 from .router.manager import start_router_process
 
 from lightllm.utils.net_utils import alloc_can_use_network_port
+from lightllm.utils.weights_utils import get_weight_dir
 from lightllm.common.configs.config import setting
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--model_dir", type=str, default=None,
-                        help="the model weight dir path, the app will load config, weights and tokenizer from this dir")
+                        help="the model weight dir path or huggingface model tag, the app will load config, weights and tokenizer from this dir")
     parser.add_argument("--tokenizer_mode", type=str, default="slow", 
                         help="""tokenizer load mode, can be slow or auto, slow mode load fast but run slow, slow mode is good for debug and test, 
                         when you want to get best performance, try auto mode""")
@@ -147,8 +148,9 @@ if __name__ == "__main__":
     can_use_ports = alloc_can_use_network_port(num=3 + args.tp)
     router_port, detokenization_port, httpserver_port = can_use_ports[0:3]
     model_rpc_port = can_use_ports[3]
-    
-    httpserver_manager = HttpServerManager(args.model_dir, 
+
+    args.model_dir = get_weight_dir(args.model_dir, ignore_patterns=["*.pth", "*.bin"])
+    httpserver_manager = HttpServerManager(args.model_dir,
                                            args.tokenizer_mode, 
                                            router_port=router_port, 
                                            httpserver_port=httpserver_port, 

@@ -30,7 +30,7 @@ class HttpServerManager:
         req_total_len = len(prompt_ids) + sampling_params.max_new_tokens
         if req_total_len > self.max_req_total_len:
             raise ValueError(f"the req token total len (input len + output len) is too long > {self.max_req_total_len}")
-        
+
         self.send_to_router.send_pyobj((prompt_ids, sampling_params, request_id))
         event = asyncio.Event()
         self.req_id_to_out_inf[request_id] =("", False, event)

@@ -7,7 +7,7 @@ from transformers.configuration_utils import PretrainedConfig
 from lightllm.server.router.model_infer.infer_batch import InferBatch
 from rpyc.utils.classic import obtain
 
-from lightllm.models.llama2.layer_infer.model import Llama2TpPartModel
+from lightllm.models.llama2.layer_infer.model import Llama2Model
 from lightllm.utils.infer_utils import set_random_seed
 from lightllm.utils.infer_utils import calculate_time, mark_start, mark_end
 from .post_process import sample
@@ -29,7 +29,7 @@ class ModelRpcServer(rpyc.Service):
         self.model_type = model_cfg["model_type"]
         if self.model_type == 'llama':
            if "num_key_value_heads" in model_cfg.keys():
-               self.model = Llama2TpPartModel(weight_dir, max_total_token_num, load_way, mode)
+               self.model = Llama2Model(weight_dir, max_total_token_num, load_way, mode)
         else:
             raise ValueError("Not supported model type! The current support model list is [bloom llama].")
         
