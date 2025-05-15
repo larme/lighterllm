@@ -26,6 +26,6 @@ setup(
         "packaging",
         "rpyc",
         "ninja",
-        "triton==2.1.0"
+        "triton>=2.1.0"
     ],
 )
