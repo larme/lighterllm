@@ -33,8 +33,8 @@ class TransformerLayerInfer:
         self.key_value_head_num_ = network_config["num_key_value_heads"]
         self.kv_head_sum_dim_ = self.key_value_head_num_ * self.head_dim_
         
-        self.tp_head_num_ = self.head_num_
-        self.tp_head_sum_dim_ = self.tp_head_num_ * self.head_dim_
+        self.head_num_ = self.head_num_
+        self.head_sum_dim_ = self.head_num_ * self.head_dim_
         
         self.mode = mode
         return

@@ -18,11 +18,11 @@ class PostLayerInfer:
     def __init__(self, network_config):
         self.network_config_ = network_config
         self.vocab_size_ = network_config["vocab_size"]
-        self.tp_vocab_size_ = network_config["vocab_size"]
+        self.vocab_size_ = network_config["vocab_size"]
         self.embed_dim_ = network_config["hidden_size"]
         self.layer_norm_eps_ = network_config["rms_norm_eps"]
         self.vob_start_id_ = 0
-        self.vob_end_id_ = self.tp_vocab_size_
+        self.vob_end_id_ = self.vocab_size_
 
     def soft_max(self, data):
         return torch.softmax(data.permute(1, 0).float(), dim=-1)

@@ -16,11 +16,11 @@ class PreLayerInfer:
 
     def __init__(self, network_config):
         self.network_config_ = network_config
-        self.tp_vocab_size_ = network_config["vocab_size"]
+        self.vocab_size_ = network_config["vocab_size"]
         self.embed_dim_ = network_config["hidden_size"]
         self.layer_norm_eps_ = network_config["rms_norm_eps"]
         self.vob_start_id_ = 0
-        self.vob_end_id_ = self.tp_vocab_size_
+        self.vob_end_id_ = self.vocab_size_
 
     @mark_cost_time("pre context forward")
     def context_forward(self, input_ids, infer_state: InferStateInfo, layer_weight: PreAndPostLayerWeight):
