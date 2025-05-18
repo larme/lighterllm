@@ -130,7 +130,7 @@ if __name__ == "__main__":
                         help="the total token nums the gpu and model can support, equals = max_batch * (input_len + output_len)")
     parser.add_argument("--batch_max_tokens", type=int, default=None,
                         help="max tokens num for new cat batch, it control prefill batch size to Preventing OOM")
-    parser.add_argument("--eos_id", type=int, default=2,
+    parser.add_argument("--eos_id", type=int, default=None,
                         help="eos stop token id")
     parser.add_argument("--running_max_req_size", type=int, default=1000,
                         help="the max size for forward requests in the same time")

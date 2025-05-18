@@ -24,7 +24,12 @@ class RouterManager:
         self.req_queue = ReqQueue(max_total_token_num, batch_max_tokens, running_max_req_size)
 
         self.running_batch: Batch = None
-        self.eos_id = eos_id
+        if eos_id is not None:
+            self.eos_id = eos_id
+        else:
+            from ..tokenizer import get_tokenizer
+            self.tokenizer = get_tokenizer(self.model_weightdir)
+            self.eos_id = self.tokenizer.eos_token_id
         self.has_wait_tokens = 0
         self.max_wait_tokens = 10
         
